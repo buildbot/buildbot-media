@@ -12,5 +12,5 @@
 from buildbot.buildslave import BuildSlave
 
 def get_slaves():
-    return [BuildSlave("12.04-slave", "pass")]
+    return [BuildSlave("slave", "pass")]
 
