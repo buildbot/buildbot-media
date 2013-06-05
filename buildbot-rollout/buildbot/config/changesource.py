@@ -9,19 +9,8 @@
 #        workdir='gitpoller-workdir', branch='master',
 #        pollinterval=300)
 
-from buildbot.changes.svnpoller import SVNPoller
+from buildbot.changes.gitpoller import GitPoller
 
 def get_source():
-    return GitPoller
+    return GitPoller("https://github.com/mlakewood/Buildbot-rollout.git", branch="master")
 
-def split_file_branches(path):
-    print path
-    pieces = path.split('/')
-    if len(pieces) > 1 and pieces[0] == 'trunk':
-        return ('trunk', '/'.join(pieces[1:]))
-    elif len(pieces) > 2 and pieces[0] == 'branch':
-        print "found branch!"
-        return ('/'.join(pieces[0:2]),
-                '/'.join(pieces[2:]))
-    else:
-        return None
