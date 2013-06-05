@@ -8,7 +8,7 @@ from buildbot.steps.source.git import Git
 def get_buildsteps(working_dir):
     build_steps = BuildFactory()
 
-    repo = Git(repourl="https://github.com/mlakewood/Buildbot-rollout.git", branch='master')
+    repo = Git(repourl=" buildbot", branch='master')
 
     virt_env = working_dir + '/virt/lib'
 
@@ -31,7 +31,7 @@ def get_buildsteps(working_dir):
     build_steps.addStep(ShellCommand(workdir=working_dir, description="Install packages", command=command.split(" ")))
 
     # Run the tests through coverage to get test coverage at the same time
-    command = "virt/bin/coverage run --include=api/* --omit=*.json python -m unittest discover -vf"
+    command = "virt/bin/coverage run --include=api/* --omit=*.json python -m unittest discover -vf tests"
     build_steps.addStep(ShellCommand(workdir=working_dir, description="rollout Unit Tests", command=command.split(" "), env=env))
 
     # Output the coverage report
@@ -45,5 +45,5 @@ def get_buildsteps(working_dir):
     command = "./jslint js nohilite"
     build_steps.addStep(ShellCommand(workdir=working_dir + '/front_ends/insight', description="Insight JSLint code", command=command.split(" "))) 
 
-    return f
+    return build_steps
 
