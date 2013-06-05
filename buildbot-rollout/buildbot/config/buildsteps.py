@@ -8,7 +8,7 @@ from buildbot.steps.source.git import Git
 def get_buildsteps(working_dir):
     build_steps = BuildFactory()
 
-    repo = Git(repourl=" buildbot", branch='master')
+    repo = Git(repourl="https://github.com/mlakewood/Buildbot-rollout.git", branch='master')
 
     virt_env = working_dir + '/virt/lib'
 
