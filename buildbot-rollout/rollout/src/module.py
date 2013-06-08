@@ -1,7 +1,9 @@
+"""
+An example function to test
+"""
 
-
-def bumblebee(x, y):
+def bumblebee(in_x, in_y):
     """
     sum x and y and return
     """
-    return x + y
+    return in_x + in_y
