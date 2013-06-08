@@ -39,11 +39,11 @@ def get_buildsteps(working_dir):
     build_steps.addStep(ShellCommand(workdir=working_dir, description="API Unit Test Coverage Report", command=command.split(" ")))
 
     # Run pylint. P
-    command = "%s pylint %s/api --rcfile=.pylintrc" % (slave_python, working_dir)
+    command = "pylint %s/rollout --rcfile=rollout/.pylintrc" % (working_dir)
     build_steps.addStep(PyLint(workdir=working_dir, description="API pylint", command=command.split(" ")))
 
-    command = "./jslint js nohilite"
-    build_steps.addStep(ShellCommand(workdir=working_dir + 'js', description="Insight JSLint code", command=command.split(" "))) 
+    command = "./jslint js/*"
+    build_steps.addStep(ShellCommand(workdir=working_dir + '/rollout', description="Insight JSLint code", command=command)) 
 
     return build_steps
 
