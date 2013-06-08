@@ -12,5 +12,5 @@
 from buildbot.changes.gitpoller import GitPoller
 
 def get_source():
-    return GitPoller("https://github.com/mlakewood/Buildbot-rollout.git", branch="master")
+    return GitPoller("https://github.com/mlakewood/Buildbot-rollout.git", branch="master", pollinterval=10)
 

@@ -15,17 +15,17 @@ def get_builders(name, build_dir):
     builders.append(
         BuilderConfig(name="12.04-" + name,
           slavenames=['slave'], slavebuilddir=build_dir,
-          factory=buildsteps.get_buildsteps(build_dir + "/src")))
+          factory=buildsteps.get_buildsteps(build_dir + "/build")))
     
     builders.append(
         BuilderConfig(name="12.04-" + name + '_try',
           slavenames=['slave'], slavebuilddir=build_dir,
-          factory=buildsteps.get_buildsteps(build_dir + "/src_try")))
+          factory=buildsteps.get_buildsteps(build_dir + "/build")))
 
     builders.append(
         BuilderConfig(name="12.04-" + name + '_sprint',
           slavenames=['slave'], slavebuilddir=build_dir,
-          factory=buildsteps.get_buildsteps(build_dir + "/src_sprint")))
+          factory=buildsteps.get_buildsteps(build_dir + "/build")))
 
 
     return builders

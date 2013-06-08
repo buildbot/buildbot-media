@@ -25,12 +25,12 @@ from buildbot.schedulers.trysched import Try_Userpass
 def get_schedulers(build):
 
     quick = SingleBranchScheduler(name='quick',
-                                branch='trunk',
+                                branch='master',
                                 treeStableTimer=60,
                                 builderNames=["12.04-" + build])
 
     sprint = SingleBranchScheduler(name='sprint',
-                                branch='branch/sprint',
+                                branch='sprint',
                                 treeStableTimer=60,
                                 builderNames=["12.04-" + build + '_sprint'])
 
