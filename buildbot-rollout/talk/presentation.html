@@ -221,7 +221,7 @@
         <li>An industry leader in shelf-edge marketing.</li>
         <li>This talk can be found at:
         <a href="https://github.com/mlakewood/Buildbot-rollout">  https://github.com/mlakewood/Buildbot-rollout</a></li>
-        <li style="line-height: 30px;">Browse the code while the talk is happening to give you a better idea of whats happening.</li>
+        <li style="line-height: 30px;">It also contains all the code in this talk in a single complete, though simplified buildbot config.</li>
     </div>
 
     <!--
@@ -388,7 +388,7 @@ quick = SingleBranchScheduler(name='quick',
 
         <li>Slaves do all the work </li>
         <li>They have a seperate twisted daemon running </li>
-        <li>They connect to the master twisted daemon and wait for builders to be triggered </li>
+        <li>They connect to the master twisted daemon and wait for builds to be triggered </li>
         <pre class="prettyprint">
 BuildSlave("slave", "pass")
         </pre>
@@ -480,6 +480,14 @@ BuildmasterConfig = {
     </div>
 
     <div class="step slide" data-x="16000" data-y="-1500">
+        <h1>Advanced Features</h1>
+        <li>IRC Bot</li>
+        <li>Latent Buildslaves</li>
+        <li>Request status of build through JSON API</li>
+        <li>Did I mention its all python?</li>
+    </div>
+
+    <div class="step slide" data-x="17000" data-y="-1500">
         <div style="height: 200px;"></div>
         <h1>Questions?</h1>
     </div>
