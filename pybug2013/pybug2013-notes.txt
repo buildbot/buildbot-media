@@ -1,0 +1,416 @@
+What is Buildbot?
+=================
+
+.. time:
+    4 minutes
+
+What purpose does Buildbot serve?
+When would I want to use it?
+
+Buildbot is a framework for automating build, test, and release processes.
+It's used for continuous integration, continuous deployment, and release management.
+
+Building
+--------
+
+Building means compiling, minifying, linking and generally producing what you need to actually run the app from the source code.
+You want this process to be automated and repeatable, so that you can eliminate variation in the build process or environment as a cause of different behavior.
+This is particularly important in CD - shipping an RPM accidentally built on the wrong version of CentOS to all of your production servers would be very painful.
+At Mozilla, we build for lots and lots of platforms - more than we could expect any one developer to maintain - and each build can take a very long time.
+So automation, and parallelism, is critical to getting results in a reasonable (but still very long) amount of time.
+Open source projects generally support multiple operating systems or environments, and more often those platforms are maintained by one or two project members.
+Automating builds on those platforms allows everyone to be confident their change hasn't broken a platform they don't normally use.
+
+Testing
+-------
+
+Testing means running test suites of all sorts - unit, acceptance, regression, integration.
+Agile best practices tell us to integrate constantly and run tests all the time.
+For a small project, developers can do this themselves, but new contributors usually won't.
+Test suites get longer, and especially integration and acceptance tests tend to be slow.
+Tests, even for platform-agnostic projects, tend to show failures on different platforms.
+At Mozilla, we have a lot of tests, and a lot of platforms and builds to run them on.
+The build and tests for a single commit can add up to hundreds of hours.
+Obviously, then, parallelism is important!
+
+Releasing
+---------
+
+Release processes include packaging software to ship to customers, and the deployment phase of continuous deployment.
+Like building and testing, automating release processes gives predictability and repeatability.
+Just like testing the software, performing releases frequently (even if the results aren't actually shipped) helps to tease out bugs that will otherwise affect customers or make schedules slip.
+For open-source projects, automating the release process also tends to allow more releases: it's usually at least a few hours' work to ship a release by hand, so busy project maintainers tend to put off releases in favor of other work on the project.
+At Mozilla, the release process involves a lot more than building RPMs and DMGs: tagging, localization, QA, signing, MAR generation, update snippets, and much more are all handled automatically.
+This has drastically shortened the end-to-end time required to make a release, and reduced the chances for human error along the way.
+
+Framework
+---------
+
+Buildbot aims to be a framework, which is somewhere between an application and a library.
+Applications work out of the box, and you configure them until they do what you want.
+Libraries provide utilities, but leave it up to you to write the core code.
+A framework is somewhere in between: it takes care of all of the common tasks, while you write the code to handle the things that make your requirements unique.
+
+Buildbot's Concepts
+===================
+
+.. time:
+    6 minutes
+
+For any application, it's important to understand the underlying conceptual model to use the tool effectively.
+As a framework, Buildbot brings a certain conceptual model, but allows users to customize the pieces of that model to suit the requirements
+
+Overview
+--------
+
+.. image:
+    overview.svg
+
+Buildbot has a distributed master-slave architecture where the *masters* instruct the *slaves* to perform each step of a build in sequence.
+The slave portion of Buildbot is platform-independent, and many slaves can be connected to each master, running builds in parallel.
+A slave may execute multiple builds simultaneously, as long as they are for different builders.
+
+So there are three pieces to consider: generating new jobs, executing jobs, and reporting on the jobs' results.
+
+Generating Jobs
+---------------
+
+.. image:
+    master.svg
+
+Buildbot's *change sources* watch for commits (called *changes*).
+The built-in change sources support the most common version-control systems with flexible configuration to support a variety of deployments.
+*Schedulers* react to new data from change sources, external events, or triggers based on clock time (e.g., for a nightly build), and add new *build requests* to the queue.
+
+Executing Jobs
+--------------
+
+.. image:
+    master.svg
+
+At its core, Buildbot is a job scheduling system: it queues jobs (called *builds* for historical reasons), executes the jobs when the required resources are available, and reports the results.
+
+Each build request comes with a set of source stamps identifying the code from each codebase used for a build.
+A *source stamp* represents a particular revision and branch in a source code repository.
+Build requests also specify a *builder* that should perform the task and a set of *properties*, arbitrary key-value pairs giving further detail about the requested build.
+Each *builder* defines the steps to take in executing a particular type of build.
+Once the request is selected for execution, the steps are performed sequentially.
+Each build is executed on exactly one slave.
+
+Reporting
+---------
+
+.. image:
+    webui.png (new screenshot)
+    irc.png (new screenshot)
+
+Once a build is complete, the framework reports the results---log files and step status---to users and developers via *status listeners*.
+Buildbot has built-in support for reporting via web, email, irc, Tinderbox, and gerrit.
+
+Buildbot Nine
+=============
+
+.. image:
+    goals list
+
+We are rebuilding Buildbot in a project called "Buildbot Nine", which will be released as version 0.9.0.
+
+This new version aims to be efficient and scalable, supporting an arbitrary number of masters.
+It will store all data in a database (nothing on-disk), and provide real-time updates as builds proceed.
+It will have a modern, dynamic, JavaScript frontend.
+It will support pluggable backends to scale smoothly from a small testbed up to a huge deployment.
+And it will do all of this with minimal incompatibility with earlier versions.
+
+This has presented some interesting development challenges and opportunities.
+I'll highlight a few of these, and hopefully those will trigger some questions that we can explore more deeply.
+
+Structure
+---------
+
+.. image:
+    from DevelopmentPlan
+
+Nine introduces a strict model to ensure correct operation across distributed masters.
+The "process" segment is what actually does all of the work - change sources, schedulers, builders, and so on.
+It talks to the data API, both getting and updating data.
+For example, schedulers may listen for new changes, examine those changes, and then add new build requests.
+The data API exposes getters, for read-only access, updates, for making changes, and subscriptions, for notifications of changes.
+Underneath, the data API can talk to multiple implementations of the DB API and the MQ API.
+The DB API wraps typical relational databases, while the MQ API wraps messaging tools like RabbitMQ.
+
+The web frontend provides access to the same data API as the Python process code via a JSON API and JSON RPC.
+The new status plugins are also built on top of the data API.
+For example, the IRC plugin will translate messages from subscriptions into IRC messages.
+
+Challenges
+----------
+
+Converting Sync to Async
+++++++++++++++++++++++++
+
+Buildbot is built on Twisted, which is an asynchronous programming framework.
+If you saw Guido's PyCon US talk about Tulip, or if you're familiar with Node server-side programming, that's what Twisted does.
+Basically, in synchronous code, you write blocking calls like this ::
+
+    def getBoatNamesSync():
+        result = dbapi.execute('SELECT name from boats')
+        return json.dumps([ r.name for r in result ])
+
+and execution of that thread blocks at the `execute` call until the query is complete.
+If you need to have the application continue, you use multiple threads - one per HTTP request, for example.
+So a server ends up with lots of threads blocked on I/O.
+
+In Twisted, instead of blocking, you arrange for the reactor to call you when your I/O is ready.
+The reactor can handle lots of concurrent I/O (using select, poll, kpoll, etc.), all in one thread.
+The resulting code looks like this::
+
+    def getBoatNamesAsync():
+        d = txdbapi.execute('SELECT name from boats')
+        def toJson(result):
+            return json.dumps([ r.name for r in result ])
+        d.addCallback(toJson)
+        return d
+
+where `d` is a Deferred object, similar to a promise.  
+You add callbacks to a Deferred that will be invoked when its result is available.
+The important thing to note here is that the two are not compatible: `getBoatNamesAsync` returns a Deferred, not a JSON string.
+And `getBoatNamesSync` will fail if `dbapi.execute` returns a Deferred.
+There is some nice generator- and decorator-based syntactic sugar that can help with this conversion::
+
+    from twisted.internet import defer
+    @defer.inlineCallbacks
+    def getBoatNamesAsync():
+        result = yield txdbapi.execute('SELECT name from boats')
+        defer.returnValue(json.dumps([ r.name for r in result ]))
+
+but this function still acts the same, returning a Deferred.
+
+So back to Buildbot, we had code that looks like this::
+
+    def createSummary(self, log):
+        # ..
+        if self.hasSyntaxError:
+            self.addCompleteLog("syntax-error", "".join(summaries['misc']))
+        else:
+            for m in self.MESSAGES:
+                if counts[m]:
+                    self.descriptionDone.append("%s=%d" % (m, counts[m]))
+                    self.addCompleteLog(m, "".join(summaries[m]))
+                self.setProperty("pyflakes-%s" % m, counts[m], "pyflakes")
+            self.setProperty("pyflakes-total", sum(counts.values()),
+                             "pyflakes")
+
+note that all of those method calls are synchronous.
+That is fine in Buildbot-0.8.x: they change in-memory attributes that are eventually pickled to disk.
+But in Nine, they all write to the database, so they have to be asynchronous.
+That means that `createSummary` needs to be asynchronous.
+Which means that whatever calls `createSummary` has to be asynchronous, and so on.
+This creates quite a bit of refactoring.
+
+On the positive side, `@defer.inlineCallbacks` makes this refactoring textually straightforward.
+On the negative side, many of these methods are part of the de-facto API for extending Buildbot, so users must change their code.
+If they don't, the error messages are not especially obvious.
+
+If you've ever tried to change the "const" status of a method in C++, this is similar.
+
+This will be the hardest part for users upgrading to nine.
+
+Building Generic REST API
++++++++++++++++++++++++++
+
+.. image:
+    from DevelopmentPlan
+
+We decided fairly early in the 'nine' process to not just add a REST interface to the side of Buildbot, but to make that interface a core part of the framework.
+Just about every component of Bulidbot will do its work by getting data from the REST API, subscribing to events, and calling update methods to make changes.
+Since the web UI is in JavaScript, it makes sense to make this interface - except for update methods - language agnostic.
+
+This has a lot of advantages:
+a single place to document URI paths, the contents of resources, and their interrelationships;
+a single model to add security, error handling, optimizations, proxies, etc. to
+
+But serializing everything within Buildbot, much less making internal HTTP connections, would incur too much useless overhead.
+So let's see what this looks like.
+
+Concretely, a build looks like this::
+
+  <build JSON>
+
+In JavaScript, this is a regular object, parsed by `JSON.parse`.
+In Python, this is a normal Python dictionary, without some of the JSON-API contextual trimmings.
+We specifically do *not* use an instance of a Build class, because that instance then starts growing behaviors, methods, optimizations, hacks, and so on, and those aren't represented in JSON.
+There's a slight worry about immutability here, but in practice that hasn't been a problem.
+
+This format is pretty strict, and strictly tested.
+All keys must be present, and values must have particular types.
+All strings are Unicode, all the time.
+This is healthy, and also means we're ready for Python 3 where bytestring-to-unicode conversion isn't implicit.
+Some identifiers are used as indexes, and their length is checked against the documented maximum.
+
+So how do you get this data? ::
+
+  http://foo.com/api/v1/build/8493
+  http://foo.com/api/v1/builder/13/build/190
+
+  yield self.master.data.get(('build', 8493))
+  yield self.master.data.get(('builder', 13, 'build', 190))
+
+What about collections?
+
+ <build steps collection>
+
+Similarly, this is returned as a list in Python.
+In Python we do use a subclass of list, so we can add some attributes - more in a moment.
+
+Filtering?
+
+ http://foo.com/api/v1/build/8493/step?number__lt=2
+ yield self.master.data.get('build', 8493, 'step', filters=[Filter('number', 'lt', 2)])
+ <build steps collection, filtered>
+
+We can filter, select columns, sort, and paginate the same way from both Python and JavaScript.
+For Python tasks that require iterating over an unbounded number of objects, the pagination will ease the memory burden on the master.
+
+Disadvantage?
+
+  <data method>
+
+The Data API provides "semantic" resources, which don't always match what's in the DB.
+So we do a lot of relatively trivial renaming, as well as hiding secondary queries and joins.
+This becomes quite a bit of boilerplate to change when adding a new column, for example.
+
+Testing: Lessons Learned
+++++++++++++++++++++++++
+
+::
+    No tests are bad.
+    Bad tests are worse.
+
+Around 0.8.0, Buildbot had ???% coverage, with flaky integration-style tests.
+Every patch would either break unrelated tests, or contain serious errors but not break any tests.
+So not only was code not tested, but the tests were not a reliable indicator of errors.
+Sometime around 0.8.3, I deleted all of the tests.
+The goal after this was to work up to 80% test coverage.
+We're still not quite there
+
+::
+    Coverage isn't everything.
+
+But I don't actually care about coverage.
+Any codebase is going to have "hot spots" where the core, interesting stuff happens, and cold spots - code that only a few people use.
+The hot spots are far more important - errors in the hot spots affect everyone.
+And you can "cover" code without testing it well.
+For example, if you mock out everything your unit touches, then you can even get 100% branch coverage of that unit, and still have errors.
+If the mocks aren't correct, you're testing the wrong thing.
+
+::
+    Use fakes and mocks sparingly,
+    And test them.
+
+Augie Fackler and Nathaniel Manista talked about this in "Stop Mocking, Start Testing" at PyCon 2012.
+When you introduce fakes, you need to interlock them strongly into the production code.
+
+::
+    <skeleton of DB tests>
+
+Test the signatures and behaviors of both the fakes and the production code with the same tests.
+If you change the tests, the production code, or the fakes, the tests should immediately fail.
+
+::
+    Unit testing is good
+    But know when to say when
+
+Suddenly, fakes are real work.
+What do you do if your SUT interacts with code you don't have a fake for?
+You can build a fake for it, but the other option is to just use the production code.
+Sure, that breaks the isolation of your unit, so errors in the dependency will cause failures in your unit test.
+But too many failures from an error is far better than none.
+
+::
+    Don't merge un-tested patches.
+
+This sounds obvious, but hard to keep to in two situations.
+First, you get a pull request with a fix that users have been clamoring for, but it has no tests.
+Or, you get a nicely written pull request from someone new to the project, and you want to encourage them to continue contributing, and not give them "busy work".
+
+Don't succumb.
+Countless times, I've found out, usually after a release, that untested code is not just subtly wrong, but totally bogus.
+This is really embarassing after a release, and the original author is invariably nowhere to be found.
+
+::
+    Test your database queries against all supported DB engines
+
+We support MySQL, Postgres, and SQLite.
+They're all relational databases, but boy are they different.
+Some of this is around production queries: field lengths, consistency checks, transactions, etc.
+But most of it is around schema migration - adding or removing tables, columns, indexes, sequences, etc.
+We test (using Buildbot, of course!) on all three, including testing each schema migration and comparing the resulting schema to the expected.
+This has caught *lots* of subtle bugs that would have otherwise left users with slightly different schemas and weird divergent behaviors.
+
+Synchronizing State and Events
+++++++++++++++++++++++++++++++
+
+Buildbot's state is stored in the database, and any update to that state is broadcast in a message (MQ).
+Ideally, you could track the state of the entire system "live" using this information: get the current state, subscribe to updates, and use the updates to keep the state current.
+
+.. image:
+    state-1.svg
+
+But this makes some strong consistency assumptions:
+the next update a client receives after getting state applies to *that* state, and not a later or earlier state;
+updates are delivered reliably, in order, without duplication; and
+updates made on different masters are applied consistently everywhere.
+
+.. image:
+    state-2.svg
+
+But we don't have that.
+We have databases with varying consistency and replication models.
+For example, MySQL will complete a transaction before that transaction is fully replicated, and replication delays can reach into the tens of seconds.
+So you can write something to the DB which is not visible on a subsequent read.
+Message queueing systems all introduce variable delays, too.
+So you really can't predict or even control when state and messages will be visible on another master.
+
+.. image:
+    state-3.svg
+
+There are some formal solutions to this, but they are hard and potentially inefficient and require a lot of work that's not Buildbot's job.
+Furthermore, they impose constraints on the data model that are hard to make compatible with existing Buildbot installs.
+
+.. image:
+    Vector_Clock.svg
+
+Buildbot's approach is basically to not address the problem.
+It does not try to be generic in its handling of resource data - there's no expectation that you could accurately model state based only on events.
+
+* Updates contain the entire resource, not just a delta.
+  This helps fix any problems of stale state - if you miss message N, but receive N+1, then you're fine.
+
+* The thing most users are going to want to see updates to is log files, and for those, only the length is included in the message.
+  So receiving an update about a logfile should trigger a client to calculate and get all of the lines it doesn't already have.
+
+* We may also add a short-term (10's of seconds) cache for events, so a client that requests a resource and updates to that resource will receive the last 30 seconds of updates to that resource as well.
+
+I'd love to fix this, and we may have to, but at some point I need to ship a CI framework!
+
+
+TODO:
+
+ * consistent abstract DB interface allows retries, backend-specific hacks, r/o vs. r/w queries
+   * lessons learned from this and Mozpool
+     * DB's fail, DB's hang, TCP connections get stuck
+     * DBA's tend to think "sure a couple queries will get lost, but they'll refresh"
+   * schema management and schema migration
+
+ * multiple layers of methods with lots of parameters, threading changes through there is hard
+   * example: adding new waited_for column to buildrequests - change schema, write schema migration
+   * don't have a good solution here yet
+
+Managing a Major Refactor
++++++++++++++++++++++++++
+
+   * work is on the 'nine' branch, branched in October 2011
+   * have released 0.8.7 and 0.8.8 since then
+   * increasingly, patches against master result in a difficult or null merge to nine
+   * but nine is not feature-complete, so we can't ask users to start using it
+

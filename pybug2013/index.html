@@ -1,0 +1,956 @@
+<!doctype html>
+<html lang="en" class="no-badge"> <!-- start with no-badge since that's the first slide -->
+
+    <head>
+        <meta charset="utf-8">
+
+        <title>Buildbot</title>
+
+        <meta name="description" content="A framework for easily creating beautiful presentations using HTML">
+        <meta name="author" content="Hakim El Hattab">
+
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+        <link rel="stylesheet" href="css/reveal.min.css">
+        <link rel="stylesheet" href="css/theme/buildbot.css" id="theme">
+
+        <!-- For syntax highlighting -->
+        <link rel="stylesheet" href="lib/css/zenburn.css">
+
+        <!-- If the query includes 'print-pdf', use the PDF print sheet -->
+        <script>
+            document.write( '<link rel="stylesheet" href="css/print/' + ( window.location.search.match( /print-pdf/gi ) ? 'pdf' : 'paper' ) + '.css" type="text/css" media="print">' );
+        </script>
+
+        <!--[if lt IE 9]>
+        <script src="lib/js/html5shiv.js"></script>
+        <![endif]-->
+    </head>
+
+    <body>
+
+        <div class="badge">
+            <div>Buildbot</div>
+        </div>
+
+        <div class="reveal">
+
+            <!-- Any section element inside of this container is displayed as a slide -->
+            <div class="slides">
+
+                <section data-state="no-badge">
+                    <h1>Buildbot</h1>
+                    <h4>The Continuous Integration Framework</h4>
+                    <p>
+                        <small>Dustin J. Mitchell<br />Mozilla</small>
+                    </p>
+                    <img src="img/nut.png" border="0" style="height: 200px" />
+                </section>
+
+                <section>
+                    <h2>Outline</h2>
+                    <p>
+                        <ul>
+                            <li>
+                                What is Buildbot?
+                                <ul>
+                                    <li>What does it do?</li>
+                                    <li>What is it used for?</li>
+                                    <li>How does it work?</li>
+                                </ul>
+                            </li>
+                            <li>
+                                Development Challenges
+                                <ul>
+                                    <li>Converting from Sync to Async</li>
+                                    <li>Building a Generic Data API</li>
+                                    <li>Testing: Lessons Learned</li>
+                                    <li>Synchronizing State and Events</li>
+                                </ul>
+                            </li>
+                        </ul>
+
+
+                </section>
+
+                <section>
+                    <h2>What is Buildbot?</h2>
+                    <p>
+
+                        Buildbot is a
+                        <em data-fragment-index=4 class="fragment highlight-red">framework</em>
+                        for automating
+                        <br />
+                        <em data-fragment-index=1 class="fragment highlight-red">build</em>,
+                        <em data-fragment-index=2 class="fragment highlight-red">test</em>, and
+                        <em data-fragment-index=3 class="fragment highlight-red">release</em>
+                        processes.
+
+                    </p>
+                    <aside class="notes">
+
+                    <ul>
+
+                        <li>Building - control the build environment, consistent process
+                        <!-- Building means compiling, minifying, linking and
+                        generally producing what you need to actually run the
+                        app from the source code.  You want this process to be
+                        automated and repeatable, so that you can eliminate
+                        variation in the build process or environment as a
+                        cause of different behavior. -->
+
+                        <li>Testing - agile requirement, run for every commit, cross-platform
+                        <!-- Testing means running test suites of all sorts -
+                        unit, acceptance, regression, integration.  Agile best
+                        practices tell us to integrate constantly and run tests
+                        all the time.  With automation, you can do this for
+                        every commit, and across platforms.  -->
+
+                        <li>Release - packaging or deployment; reproducible means more frequent, fewer bugs
+                        <!-- Release processes include packaging software to
+                        ship to customers, and the deployment phase of
+                        continuous deployment.  Like building and testing,
+                        automating release processes gives predictability and
+                        repeatability. -->
+
+                        <li>Framework - somewhere between an application and a library.
+                        <!-- Applications work out of the box, and you
+                        configure them until they do what you
+                        want.  Libraries provide utilities, but leave it up to
+                        you to write the core code.  A framework is somewhere
+                        in between: it takes care of all of the common tasks,
+                        while you write the code to handle the things that make
+                        your requirements unique. -->
+                    </ul>
+
+                    </aside>
+                </section>
+
+                <section>
+                    <h2>Overview</h2>
+
+                    <img src="overview.svg" alt="Overview Graphic">
+
+                    <aside class="notes">
+
+                    <p> Buildbot has a distributed master-slave architecture,
+                    with the slaves doing the work of building, testing, and
+                    releasing, and the masters coordinating all of it.  Masters
+                    communicate with version control repositories to learn
+                    about new code and handle reporting the results of builds
+                    externally.  There can be many masters and many slaves in
+                    a single Buildbot installation.</p>
+
+                    <p>The core of all this is a distributed job-scheduling
+                    system.  We call jobs "builds".</p>
+
+                    <p>So there are three pieces to consider: generating
+                    new jobs, executing jobs, and reporting on the jobs'
+                    results.  </p>
+
+                    </aside>
+                </section>
+
+                <section>
+                    <h2>Generating Jobs</h2>
+
+                    <img src="generating.svg" width="100%">
+
+                    <aside class="notes">
+
+                    <ul>
+                        <li>Schedulers are at the heart of generating new jobs.
+                        <li>Inputs are time of day or HTTP requests, or changes
+                        <li>Changes are provided by ChangeSources, which watch version-control repos, either polling or receiving notifications
+                        <li>When I scheduler decides to act, it creates a set of build requests.
+                        <li>Each has a set of source stamps giving the source to build (can do multiple repos), properties, and a builder name
+                        <li>Builders are where requests are queued, and also determine the steps to run for the build
+                    </ul>
+
+                    </aside>
+                </section>
+
+                <section>
+                    <h2>Executing Jobs</h2>
+
+                    <img src="executing.svg" width="100%">
+
+                    <aside class="notes">
+
+                    <ul>
+                        <li>A builder has a set of slaves that it can use to perform builds (can be all slaves, or just a subset)
+                        <li>Same slave can be attached to multiple builders, and run in parallel (if you want)
+                        <li>Builder schedules a build once it has a request and a slave and any other required resources
+                    </ul>
+
+                    </aside>
+                </section>
+
+                <section>
+                    <section>
+                        <h2>Reporting Status</h2>
+
+                        <img src="grid.png">
+
+                        <aside class="notes">
+
+                        <p>Once a build is complete, the framework reports the
+                        results---log files and step status---to users and
+                        developers via *status listeners*.  Buildbot has built-in
+                        support for reporting via web, email, irc, Tinderbox, and
+                        gerrit. (VERTICAL)</p>
+
+                        </aside>
+                    </section>
+
+                    <section>
+                        <h2>Reporting Status</h2>
+
+                        <img src="ircbot.png" width="100%">
+                    </section>
+                </section>
+
+                <section>
+                    <h2>Buildbot Development</h2>
+
+                    <h3>"Nine":</h3>
+                    <p>Ongoing work on a major refactor that will become Buildbot-0.9.0</p>
+                </section>
+
+                <section>
+                    <h2>Buildbot Nine Goals</h2>
+
+                    <ul>
+                        <li class="fragment">Efficient, scalable operation</li>
+                        <li class="fragment">Well-defined APIs for users to build on</li>
+                        <li class="fragment">All state stored in a database</li>
+                        <li class="fragment">Real-time updates as builds proceed</li>
+                        <li class="fragment">Modern, fast web interface using a popular JS framework</li>
+                        <li class="fragment">Pluggable backends to suit different use-cases</li>
+                        <li class="fragment">Support for distributed masters with no loss in functionality </li>
+                        <li class="fragment">Maximum compatibility for existing users</li>
+                    </ul>
+
+                    <aside class="notes">
+
+                    Buildbot nine tries to make Buildbot a solid, modern
+                    application that will still be useful in another 10 years.
+
+                    </aside>
+                </section>
+
+                <section>
+                    <h2>Buildbot Nine Design</h2>
+
+                    <img src="devplan.svg" width="100%">
+
+                    <aside class="notes">
+
+                    <p>So the central design is a "Data API" which governs access
+                    to all of Buildbot's state.  This abstracts a database
+                    component (state) and a message queueing component (state
+                    updates).  The API it provides has four parts: a simple
+                    read-only API, an event API, update methods, and
+                    control methods.</p>
+
+                    <p>The process code -- the stuff doing the
+                    actual work -- makes update calls to change state, which
+                    has the side-effect of generating events.  The status code
+                    uses events and the read API to keep users informed of
+                    build status.  The web UI does the same, and also invokes
+                    control methods to perform actions such as cancelling a
+                    build or re-trying a build.  Note that the web UI is
+                    written in JavaScript, and its access to the Data API is
+                    mediated through HTTP.</p>
+
+                    <p>So with that as context, I'll highlight a few of the
+                    challenges we've faced in building this new system, in
+                    hopes this triggers some questions we can explore more
+                    deeply.</p>
+
+                    </aside>
+                </section>
+    <!-- ------------------------------------------>
+                <section>
+                    <section>
+                        <h2>Converting Sync to Async</h2>
+                    </section>
+
+                    <section>
+                        Synchronous code:
+                        <pre><code data-trim>
+def getBoatNamesSync():
+    result = dbapi.execute('SELECT name from boats')  # BLOCKS
+    return json.dumps([ r.name for r in result ])
+                        </code></pre>
+                        <aside class="notes">
+<p>Buildbot is built on Twisted, which is an asynchronous programming framework.
+If you saw Guido's PyCon US talk about Tulip, or if you're familiar with Node server-side programming, that's what Twisted does.
+Basically, in synchronous code, you write blocking calls like this ::</p>
+
+<p>and execution of that thread blocks at the `execute` call until the query is complete.
+If you need to have the application continue, you use multiple threads - one per HTTP request, for example.
+So a server ends up with lots of threads blocked on I/O.</p>
+                        </aside>
+                    </section>
+                    <section>
+                        Asynchronous code with Twisted:
+                        <pre><code data-trim>
+def getBoatNamesAsync():
+    d = txdbapi.execute('SELECT name from boats')
+    def toJson(result):
+        return json.dumps([ r.name for r in result ])
+    d.addCallback(toJson)
+    return d  # returns immediately, with result coming later
+                        </code></pre>
+                        <aside class="notes">
+                        <ul>
+                            <li>In Twisted, instead of blocking, you arrange for the reactor to call you when your I/O is ready.
+                            <li>The reactor can handle lots of concurrent I/O (using select, poll, kpoll, etc.), all in one thread.
+                            <li>The resulting code looks like this, where `d` is a Deferred object, similar to a promise.  
+                            <li>You add callbacks to a Deferred that will be invoked when its result is available.
+                            <li>So, this function runs almost instantaneously - it just sets up a Deferred and returns it.
+                            <li>The important thing to note here is that the two are not compatible: `getBoatNamesAsync` returns a Deferred, not a JSON string.
+                            <li>And `getBoatNamesSync` will fail if `dbapi.execute` returns a Deferred.
+                        </aside>
+                    </section>
+                    <section>
+                        Asynchronous code with Twisted and inlineCallbacks:
+                        <pre><code data-trim>
+from twisted.internet import defer
+@defer.inlineCallbacks
+def getBoatNamesAsync():
+    result = yield txdbapi.execute('SELECT name from boats')
+    defer.returnValue(json.dumps([ r.name for r in result ]))
+                        </code></pre>
+                        <aside class="notes">
+There is some nice generator- and decorator-based syntactic sugar that can help with this conversion,
+but this function still acts the same, returning a Deferred.
+                        </aside>
+                    </section>
+                    <section>
+                        Buildbot - synchronous
+                        <pre><code data-trim>
+#
+def createSummary(self, log):
+    # ..
+    if self.hasSyntaxError:
+        self.addCompleteLog("syntax-error",
+                        "".join(summaries['misc']))
+    else:
+        for m in self.MESSAGES:
+            if counts[m]:
+                self.descriptionDone.append("%s=%d" % (m, counts[m]))
+                self.addCompleteLog(m, "".join(summaries[m]))
+            self.setProperty("pyfl-%s" % m, counts[m], "pyfl")
+        self.setProperty("pyflakes-total", sum(counts.values()),
+                            "pyflakes")
+                        </code></pre>
+                        <aside class="notes">
+So back to Buildbot, we had code that looks like this.
+Note that all of those method calls are synchronous.
+That is fine in Buildbot-0.8.x: they change in-memory attributes that are eventually pickled to disk.
+But in Nine, they all write to the database, so they have to be asynchronous.
+                        </aside>
+                    </section>
+                    <section>
+                        Buildbot - asynchronous
+                        <pre><code data-trim>
+@defer.inlineCallbacks
+def createSummary(self, log):
+    # ..
+    if self.hasSyntaxError:
+        yield self.addCompleteLog("syntax-error",
+                        "".join(summaries['misc']))
+    else:
+        for m in self.MESSAGES:
+            if counts[m]:
+                self.descriptionDone.append("%s=%d" % (m, counts[m]))
+                yield self.addCompleteLog(m, "".join(summaries[m]))
+            yield self.setProperty("pyfl-%s" % m, counts[m], "pyfl")
+        yield self.setProperty("pyflakes-total", sum(counts.values()),
+                            "pyflakes")
+                        </code></pre>
+                        <aside class="notes">
+That means that `createSummary` needs to be asynchronous.
+The syntactic change is minimal - some yields and a decorator.
+But the impact is significant - it returns a Deferred.
+Which means that whatever calls `createSummary` has to be asynchronous, and so on.
+This creates quite a bit of refactoring, all the way up the call tree.
+It also means an API change if that method was part of the API.
+                        </aside>
+                    </section>
+                    <section>
+                        <h3>cons</h3>
+                        <ul>
+                          <li>Public API change</li>
+                          <li class="fragment">Subtle errors on mismatch</li>
+                          <li class="fragment">Huge diffs for the refactor</li>
+                          <li class="fragment">Operations are no longer atomic</li>
+                        </ul>
+                        <h3>pros</h3>
+                        <ul>
+                          <li>"everything is async" is easy to remember</li>
+                          <li class="fragment">@inlineCallbacks means syntax is similar</li>
+                        </ul>
+                        <aside class="notes">
+                            <p>So this has some benefits, and some significant costs.</p>
+
+                            <p>The API changes resulting from this will probably be the
+                            most difficult part of users' upgrade to nine</p>
+
+                        </aside>
+                    </section>
+                </section>
+    <!-- ------------------------------------------>
+                <section>
+                    <section>
+                        <h2>Generic Data API</h2>
+                    </section>
+                    <section>
+                        <img src="devplan.svg" width="100%">
+                        <aside class="notes">
+
+                        <ul>
+                            <li>The "read" portion of the Data API is used by everything
+                            <li>Both from Python code, JS for the web UI, and as an external API
+                            <li>So it needs to be solid, efficient, future-proof, secure, flexible - awesome.
+                        </ul>
+                        </aside>
+                    </section>
+                    <section>
+                        <img src="restful_web_svcs_cookbook.jpg" width="40%">
+                        <img src="rest_api_design_rulebook.jpg" width="40%">
+                        <aside class="notes">
+                        <ul>
+                            <li>It makes sense to make this interface language agnostic.
+                            <li>And REST seems to be the de-facto interoperability model.
+                            <li>When we began, I knew next to nothing about designing a REST API.
+                            <li>I'd used a few, but never built one.
+                            <li>So we experimented with a few forms, and these two books proved invaluable in providing concrete implementation suggestions.
+                            <li>I accepted most of these suggestions, and rejected a few thoughtfully.
+                        </ul>
+                        REST is built around "entities", of differing types, so let's look at one.
+                        </aside>
+                    </section>
+                    <section>
+                        <img src="masters-docs.png">
+                        <aside class="notes">
+
+                        <ul>
+                            <li>This has a few attributes, each with a specific type.
+                            <li>These types are tightly enforced, including checking that all strings are Unicode
+                            <li>There are a few events that can occur - masters starting and stopping
+                            <li>And there are URI paths to fetch entities (more than you can see here)
+                        </ul>
+                        What does this look like?
+                    </section>
+                    <section>
+                        <pre><code data-trim>
+{ "masters": [
+    {
+      "active": true, 
+      "last_active": 1379629099, 
+      "link": "http://euclid.r.igoro.us:8010/api/v2/master/1", 
+      "masterid": 1, 
+      "name": "euclid.r.igoro.us:/A/bbrun"
+    }
+  ], 
+  "meta": {
+  }
+}
+                        </code></pre>
+                        <aside class="notes">
+<p>Concretely, a build looks like this.
+In JavaScript, this is a regular object, parsed by `JSON.parse`.</p>
+
+<p>But serializing everything within Buildbot, much less making internal HTTP connections, would incur too much useless overhead.
+So let's see what this looks like in Python.</p>
+                        </aside>
+                    </section>
+                    <section>
+                        <pre><code data-trim>
+{
+    u"active": True, 
+    u"last_active": 1379629099, 
+    u"link": Link((u'master', 1)),
+    u"masterid": 1, 
+    u"name": u"euclid.r.igoro.us:/A/bbrun"
+}
+                        </code></pre>
+                        <aside class="notes">
+<p>
+This is a normal Python dictionary, without some of the JSON-API contextual trimmings.
+We specifically do *not* use an instance of a Master class, because that instance then starts growing behaviors, methods, optimizations, hacks, and so on, and those aren't represented in JSON.
+</p>
+<p>
+So how do you get this data?
+</p>
+                        </aside>
+                    </section>
+                    <section>
+                        <h4>HTTP:</h4>
+                        <ul>
+                            <li>http://foo.com/api/v1/build/8493
+                            <li>http://foo.com/api/v1/builder/13/build/190
+                        </ul>
+
+                        <h4>Python:</h4>
+                        <pre><code data-trim>
+yield self.master.data.get(('build', 8493))
+yield self.master.data.get(('builder', 13, 'build', 190))
+                        </code></pre>
+                        <aside class="notes">
+<p>
+With some logical URIs, or in Python, tuples with the same components.
+</p>
+<p>
+What about collection results?
+</p>
+                        </aside>
+                    </section>
+                    <section>
+                    HTTP:<br/>
+                        <pre><code data-trim>
+{ "builders": [
+    {
+      "builderid": 1, 
+      "name": "builder"
+    }, 
+    {
+      "builderid": 3, 
+      "name": "builder2"
+    }
+  ], 
+  "meta": {
+    "total": 2
+  }
+}
+                        </code></pre>
+                        <aside class="notes">
+<p>
+Similarly, this is returned as a list in Python.
+</p>
+                        </aside>
+                    </section>
+                    <section>
+                        Python:
+                        <pre><code data-trim>
+[
+  {
+    "builderid": 1, 
+    "name": "builder"
+  }, 
+  {
+    "builderid": 3, 
+    "name": "builder2"
+  }
+]
+                        </code></pre>
+                        <aside class="notes">
+<p>
+Although here we use a subclass of list so we can add some attributes - more in a moment.
+</p>
+<p>
+So far pretty straight forward, but users need to make more detailed queries than just lists of entities.
+</p>
+                        </aside>
+                    </section>
+                    <section>
+                        Filtering:
+                        <pre><code data-trim>
+# http://foo.com/api/v1/build/8493/step?number__lt=2
+yield self.master.data.get('build', 8493, 'step',
+        filters=[Filter('number', 'lt', 2)])
+                        </code></pre>
+
+                        Pagination:
+                        <pre><code data-trim>
+# http://foo.com/api/v1/build/8493/step?limit=3&amp;offset=6
+yield self.master.data.get('build', 8493, 'step',
+                            limit=3, offset=6)
+                        </code></pre>
+                        (selecting and ordering are supported, too)
+                        <aside class="notes">
+<p>
+Filtering only certain results works the same in Python and HTTP, and similarly for pagination.
+</p>
+<p>
+We have detail and collection requests, URIs, and query parameters, in Python and over HTTP.  How is this implemented?
+</p>
+                        </aside>
+                    </section>
+                    <section>
+                        <pre><code style="max-height: inherit" data-trim>
+class BuildsetEndpoint(base.Endpoint):
+    isCollection = False
+    pathPatterns = "/buildset/n:bsid"
+    def get(self, resultSpec, kwargs): # ...
+
+class BuildsetsEndpoint(base.Endpoint):
+    isCollection = True
+    pathPatterns = "/buildset"
+    def get(self, resultSpec, kwargs): # ...
+
+class Buildset(base.ResourceType):
+    name = "buildset"
+    plural = "buildsets"
+    endpoints = [ BuildsetEndpoint, BuildsetsEndpoint ]
+    keyFields = [ 'bsid' ]
+    class EntityType(types.Entity):
+        bsid = types.Integer()
+        submitted_at = types.Integer()
+        complete = types.Boolean()
+        results = types.NoneOk(types.Integer())
+    entityType = EntityType(name)
+                        </code></pre>
+                        <aside class="notes">
+                        <ul>
+                            <li>Each URI gets mapped to an Endpoint class, which knows how to fetch that kind of data
+                            <li>Entities of a particular type are tied together with a ResourceType class that gives
+                            runtime information on the attribute names and types, events, etc.
+                            <li>This is used for validation in the tests, and used in production too.
+                            <li>When a request comes in, it's mapped to an instance of the appropriate Endpoint class, and its get method is called.
+                        </ul>
+                        </aside>
+                    </section>
+                    <section>
+                    <ol>
+                      <li>HTTP code translates URL arguments to a ResultSpec instance using type metadata</li>
+                      <li>Data API code hands the ResultSpec to Endpoing get method, which can apply
+                          parts of it via custom DB API calls:
+                        <pre><code data-trim>
+    def get(self, resultSpec, kwargs):
+        complete = resultSpec.popBooleanFilter('complete')
+        d = self.master.db.buildsets.getBuildsets(complete=complete)
+        # ...
+                        </code></pre></li>
+                      <li>Data API code applies any remaining pieces of ResultSpec in Python</li>
+                    </ol>
+                        <aside class="notes">
+<p>
+The entity-specific method gets to apply whatever bits of the result spec it recognizes, but anything else
+will be handled genericly by the Data API code.  This means that we'll always get correct results, without
+having to implement filtering, pagination, ordering, and selecting completely for each resource type.  But
+it's easy to add that support where required for efficiency.
+</p>
+
+<p>
+Resources can also paginate themselves if there's a built-in limit to the number of results returned.
+Over HTTP this is handled with links.
+</p>
+                        </aside>
+                    </section>
+                    <section>
+                        <pre><code data-trim>
+{ "builds": [
+  // ...
+  ],
+  "meta": {
+    "total": 160,
+    "links": [
+      { "href": "http://euclid.r.igoro.us:8010/api/v2/build?offset=140&limit=20", 
+        "rel": "self" }, 
+      { "href": "http://euclid.r.igoro.us:8010/api/v2/build?limit=20", 
+        "rel": "first" }, 
+      { "href": "http://euclid.r.igoro.us:8010/api/v2/build?offset=120&limit=20", 
+        "rel": "prev" }
+    ],
+  }
+}
+                        </code></pre>
+                        <aside class="notes">
+                        </aside>
+                    </section>
+                    <section>
+                        <pre><code data-trim>
+>>> blds = yield self.master.get(('build'), offset=140)
+>>> print blds.total
+160
+>>> print blds.offset
+140
+>>> print blds[0]['id']
+141
+                        </code></pre>
+                        <aside class="notes">
+<p>
+in Python, these are handled with a list subclass that exposes the metadata as attributes.
+</p>
+                        </aside>
+                    </section>
+                    <section>
+                        <h3>Summary</h3>
+                        <p>Data API is core to Buildbot</p>
+                        <p>Data API is language-agnostic</p>
+                        <p>Data API is generic, with room for optimizations</p>
+                        <aside class="notes">
+                            Making this API core to Buildbot means that it's powerful enough to do everything, that it's rock-solid, and that changes will be carefully controlled.
+                            A language-agnostic API means that tools can be written in the most appropriate language - JavaScript for a web UI, for example.
+                        </aside>
+                    </section>
+                </section>
+    <!-- ------------------------------------------>
+                <section>
+                    <section>
+                        <h2>Testing - Lessons Learned</h2>
+                    </section>
+                    <section>
+                        <h3>Untested code is bad, but</h3>
+                        <h3>bad tests are worse</h3>
+                        <aside class="notes">
+In 0.8.0, Buildbot had 46% coverage in 250 flaky, integration-style tests.
+Every patch would either break unrelated tests, or contain serious errors but not break any tests.
+So not only was code not tested, but the tests were not a reliable indicator of errors.
+Sometime around 0.8.3, I deleted all of the tests.
+This was not received well, but turns out to have been a great idea.
+The goal after this was to work up to 80% test coverage.
+We're still not quite there, but we're getting close.
+Which leads me to..
+                        </aside>
+                    </section>
+                    <section>
+                        <h3>Coverage isn't everything.</h3>
+                        <aside class="notes">
+I don't actually care about coverage.
+And you can "cover" code without testing it well.
+For example, if you mock out everything your unit touches, then you can even get 100% branch coverage of that unit, and still have errors.
+If the mocks aren't correct, you're testing the wrong thing.
+Which leads me to..
+                        </aside>
+                    </section>
+                    <section>
+                        <h3>Use fakes and mocks sparingly,</h3>
+                        <h3>and test them.</h3>
+                        <aside class="notes">
+Augie Fackler and Nathaniel Manista talked about this in "Stop Mocking, Start Testing" at PyCon 2012.
+When you introduce fakes, you need to interlock them strongly into the production code.
+                        </aside>
+                    </section>
+                    <section>
+                        <pre><code data-trim>
+from buildbot.test.util import interfaces
+
+class Tests(interfaces.InterfaceTests):
+    def test_getBuild(self):
+        # ...
+
+class RealTests(Tests):
+    def test_addBuild_existing_race(self):
+        # ...
+
+class TestFakeDB(unittest.TestCase, Tests):
+    def setUp(self): # ... set up the fake DB
+
+class TestRealDB(unittest.TestCase, RealTests):
+    def setUp(self): # ... set up a real DB
+</code></pre>
+
+                        <aside class="notes">
+
+                        We set up this nice system to run exactly the same test
+                        methods on both the fake and production code, to ensure
+                        that none of the expected behaviors differ between the
+                        two.  Everything's interlocked, then: change the
+                        production code and the tests fail; adjust the tests
+                        and they fail for the fakes; change the fakes and any
+                        other production code depending on those fakes starts
+                        failing.  All that's left is to link the docs into this
+                        sytem.
+
+                        </aside>
+                    </section>
+                    <section>
+                        <pre><code data-trim>
+class Tests(interfaces.InterfaceTests):
+    def test_signature_getBuild(self):
+        @self.assertArgSpecMatches(self.db.builds.getBuild)
+        def getBuild(self, buildid):
+            pass
+</code></pre>
+                        <aside class="notes">
+
+                        But even there we get close: even function signatures
+                        are checked, so adding new functionality, e.g., a new
+                        optional argument, will fail until everything is
+                        changed.  This uses some nice syntactic sugar to for
+                        the check.
+
+                        </aside>
+                    </section>
+                    <section>
+                        <h3>Unit testing is good,</h3>
+                        <h3>but know when to say when</h3>
+                        <aside class="notes">
+Suddenly, fakes are real work.
+What do you do if your SUT interacts with code you don't have a fake for?
+You can build a fake for it, but the other option is to just use the production code.
+Sure, that breaks the isolation of your unit, so errors in the dependency will cause failures in your unit test.
+But too many failures from an error is far better than none.
+                        </aside>
+                    </section>
+                    <section>
+                        <h3>Don't merge un-tested patches</h3>
+                        <aside class="notes">
+
+                        <p>This sounds obvious, but hard to keep to in two
+                        situations.  First, you get a pull request with a fix
+                        that users have been clamoring for, but it has no
+                        tests.  Or, you get a nicely written pull request from
+                        someone new to the project, and you want to encourage
+                        them to continue contributing, and not give them "busy
+                        work".</p>
+
+                        <p>Don't succumb.  Countless times, I've found out,
+                        usually after a release, that untested code is not just
+                        subtly wrong, but totally bogus.  This is really
+                        embarassing after a release, and the original author is
+                        invariably nowhere to be found.</p>
+
+                        </aside>
+                    </section>
+                    <section>
+                        <h2>Testing - Lessons Learned</h2>
+                        <h3>Summary</h3>
+                        <aside class="notes">
+                        A lot of words have been written about testing, but so much of it is abstract and idealistic.
+                        Testing in the real world balances constraints of time, complexity, and relative importance, and all of those are pragmatic questions.
+                        I've learned a lot about real-world testing, and Buildbot has a fairly consistent approach to testing, but it's not the only one.
+                        </aside>
+                    </section>
+                </section>
+    <!-- ------------------------------------------>
+                <section>
+                    <section>
+                        <h2>Synchronizing State and Events</h2>
+                    </section>
+                    <section>
+                    <img src="state-1.svg" width="100%">
+                        <aside class="notes">
+Buildbot's state is stored in the database, and any update to that state is broadcast in a message (MQ).
+Ideally, you could track the state of the entire system "live" using this information: get the current state, subscribe to updates, and use the updates to keep the state current.
+                        </aside>
+                    </section>
+                    <section>
+                    <img src="state-2.svg" width="100%">
+                        <aside class="notes">
+But this makes some strong consistency assumptions:
+the next update a client receives after getting state applies to *that* state, and not a later or earlier state;
+updates are delivered reliably, in order, without duplication; and
+updates made on different masters are applied consistently everywhere.
+We don't have that.
+In fact, things are much worse:
+                        </aside>
+                    </section>
+                    <section>
+                    <img src="state-3.svg" width="100%">
+                        <aside class="notes">
+We have databases with varying consistency and replication models.
+For example, MySQL will complete a transaction before that transaction is fully replicated, and replication delays can reach into the tens of seconds.
+So you can write something to the DB which is not visible on a subsequent read.
+Message queueing systems all introduce variable delays, too.
+So you really can't predict or even control when state and messages will be visible on another master.
+                        </aside>
+                    </section>
+                    <section>
+                    <img src="Vector_Clock.svg" width="100%">
+                        <aside class="notes">
+There are some formal solutions to this, but they are hard and potentially inefficient, lots of work, and not Buildbot's focus.
+Furthermore, they impose constraints on the data model that are hard to make compatible with existing Buildbot installs.
+                        </aside>
+                    <p><small>https://en.wikipedia.org/wiki/File:Vector_Clock.svg</small></p>
+                    </section>
+                    <section>
+                    <h3>Buildbot's approach</h3>
+                    <h4 class="fragment">Compromise</h4>
+                    <ul>
+                        <li class="fragment">State is not recoverable from events</li>
+                        <li class="fragment">All events contain the entire entity</li>
+                        <li class="fragment">Logfile updates contain only the new logfile length</li>
+                    </ul>
+                        <aside class="notes">
+Buildbot's approach is basically to not address the problem.
+It does not try to be generic in its handling of resource data -
+<ul><li>there's no expectation that you could accurately model state based only on events.</li>
+    <li>Updates contain the entire resource, not just a delta.
+    This helps fix any problems of stale state - if you miss message N, but receive N+1, then you're fine.</li>
+    <li>The thing most users are going to want to see updates to is log files, and for those, only the length is included in the message.
+    So receiving an update about a logfile should trigger a client to calculate and get all of the lines it doesn't already have.</li>
+</ul>
+
+                        </aside>
+                    </section>
+                    <section>
+                    <h3>Future Ideas</h3>
+                    <h4 class="fragment">Band-Aids</h4>
+                    <ul>
+                        <li class="fragment">Include a short (10s?) history cache in the MQ layer</li>
+                        <li class="fragment">Implement vector clocks between MQ and DB layers</li>
+                    </ul>
+                    <h4 class="fragment">Fixes</h4>
+                    <ul>
+                        <li class="fragment">Implement a distributed database? PAXOS? 2PC? WAL?</li>
+                        <li class="fragment">Find a library that addresses this issue?</li>
+                    </ul>
+                        <aside class="notes">
+                        We may also add a short-term (10's of seconds) cache for events, so a client that requests a resource and updates to that resource will receive the last 30 seconds of updates to that resource as well.
+                        We may even implement vector clocks, for a basic happened-before calculation, and use that to "embargo" updates.
+                        But that is complicated and slow and doesn't work around all of the weird behaviors of DBs.
+                        </aside>
+                    </section>
+                    <section>
+                    <h3>Am I the only one?</h3>
+                        <aside class="notes">
+                        I haven't been able to find much discussion of this problem anywhere.
+                        This is, in part, why I've chosen to not try to solve it - maybe this isn't a problem in real life?
+                        </aside>
+                    </section>
+                </section>
+                <section>
+                    <h2>Buildbot</h2>
+                    <h4>The Continuous Integration Framework</h4>
+                    <p>
+                        <small>Dustin J. Mitchell<br />
+                            dustin@mozilla.com<br />
+                            http://buildbot.net<br />
+                            slides at <a href="https://github.com/buildbot/buildbot-media">https://github.com/buildbot/buildbot-media</a><br />
+                            license: CC-SA
+                        </small>
+                    </p>
+                </section>
+            </div>
+
+        </div>
+
+        <script src="lib/js/head.min.js"></script>
+        <script src="js/reveal.min.js"></script>
+
+        <script>
+
+            // Full list of configuration options available here:
+            // https://github.com/hakimel/reveal.js#configuration
+            Reveal.initialize({
+                controls: false,
+                progress: false,
+                history: true,
+                center: true,
+                rollingLinks: false,
+
+                theme: 'buildbot',
+                transition: 'fade',
+
+                // Optional libraries used to extend on reveal.js
+                dependencies: [
+                    { src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+                    { src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+                    { src: 'plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } },
+                    { src: 'plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+                ]
+            });
+
+        </script>
+
+    </body>
+</html>
