@@ -1,0 +1,6 @@
+notes.txt
+rollout-master/*
+rollout-slave/*
+virt/*
+*.pyc
+.DS_Store
